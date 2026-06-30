@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Interprete AI</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d0f12;
+      --surface:   #13161b;
+      --border:    #1f2430;
+      --border-hi: #2d3445;
+      --text:      #e8eaf0;
+      --muted:     #5a6070;
+      --accent:    #4f8fff;
+      --accent-lo: rgba(79,143,255,.10);
+      --green:     #34d399;
+      --green-lo:  rgba(52,211,153,.12);
+      --red:       #f87171;
+      --amber:     #fbbf24;
+      --sans:      'DM Sans', sans-serif;
+      --mono:      'DM Mono', monospace;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 14px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .app {
+      display: grid;
+      grid-template-rows: 52px 1fr 40px;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── TOPBAR ── */
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: .06em;
+      color: var(--text);
+    }
+
+    .logo-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background .3s, box-shadow .3s;
+    }
+    .logo-dot.live {
+      background: var(--red);
+      box-shadow: 0 0 8px var(--red);
+      animation: blink .9s ease-in-out infinite;
+    }
+    .logo-dot.connected {
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+      animation: none;
+    }
+
+    @keyframes blink {
+      0%,100% { opacity:1; } 50% { opacity:.2; }
+    }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .status-pill {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+      padding: 3px 9px;
+      border-radius: 20px;
+      background: var(--border);
+      color: var(--muted);
+      letter-spacing: .05em;
+      transition: all .2s;
+    }
+    .status-pill.live       { background: rgba(248,113,113,.15); color: var(--red); }
+    .status-pill.connected  { background: var(--green-lo); color: var(--green); }
+
+    .lang-badge {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: var(--border);
+      color: var(--muted);
+      letter-spacing: .05em;
+      min-width: 28px;
+      text-align: center;
+      transition: all .2s;
+    }
+    .lang-badge.es { background: rgba(251,191,36,.12); color: var(--amber); }
+    .lang-badge.en { background: var(--accent-lo); color: var(--accent); }
+
+    .btn-sm {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      font-family: var(--sans);
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .btn-sm:hover { color: var(--text); border-color: var(--border-hi); background: var(--border); }
+
+    /* ── TRANSCRIPT ── */
+    .transcript {
+      overflow-y: auto;
+      padding: 20px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      scroll-behavior: smooth;
+    }
+
+    .transcript::-webkit-scrollbar { width: 3px; }
+    .transcript::-webkit-scrollbar-track { background: transparent; }
+    .transcript::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 4px; }
+
+    /* Empty state */
+    .empty {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      height: 100%;
+      color: var(--muted);
+      opacity: .4;
+    }
+    .empty-icon { font-size: 28px; }
+    .empty-text { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
+
+    /* Entries */
+    .entry {
+      display: grid;
+      grid-template-columns: 56px 1fr;
+      gap: 0 14px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+      animation: slide-in .18s ease;
+    }
+    .entry:last-child { border-bottom: none; }
+
+    @keyframes slide-in {
+      from { opacity: 0; transform: translateY(5px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .entry-meta {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 5px;
+      padding-top: 2px;
+    }
+
+    .entry-time {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--muted);
+    }
+
+    .entry-lang {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+      padding: 1px 5px;
+      border-radius: 4px;
+      text-transform: uppercase;
+    }
+    .entry-lang.es    { background: rgba(251,191,36,.1); color: var(--amber); }
+    .entry-lang.en    { background: var(--accent-lo); color: var(--accent); }
+    .entry-lang.other { background: var(--border); color: var(--muted); }
+
+    .entry-text {
+      font-size: 14px;
+      font-weight: 300;
+      color: var(--text);
+      line-height: 1.65;
+      padding-top: 1px;
+    }
+
+    .entry-translated {
+      font-size: 13px;
+      font-weight: 300;
+      font-style: italic;
+      color: var(--muted);
+      line-height: 1.55;
+      padding-top: 4px;
+    }
+
+    /* ── BOTTOMBAR ── */
+    .bottombar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: .04em;
+      flex-shrink: 0;
+    }
+
+    .stats { display: flex; gap: 18px; }
+    .stat-val { color: var(--text); font-weight: 500; }
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <!-- TOPBAR -->
+  <header class="topbar">
+    <div class="logo">
+      <div class="logo-dot" id="logoDot"></div>
+      INTERPRETE AI
+    </div>
+    <div class="topbar-right">
+      <span class="lang-badge" id="langBadge">—</span>
+      <span class="status-pill" id="statusPill">Waiting</span>
+      <button class="btn-sm" id="clearBtn">Clear</button>
+      <button class="btn-sm" id="copyBtn">Copy</button>
+    </div>
+  </header>
+
+  <!-- TRANSCRIPT -->
+  <div class="transcript" id="transcript">
+    <div class="empty" id="emptyState">
+      <div class="empty-icon">⌥</div>
+      <div class="empty-text">waiting for audio</div>
+    </div>
+  </div>
+
+  <!-- BOTTOMBAR -->
+  <footer class="bottombar">
+    <div class="stats">
+      <span>Segments <span class="stat-val" id="statSegs">0</span></span>
+      <span>Words <span class="stat-val" id="statWords">0</span></span>
+      <span>Session <span class="stat-val" id="statTime">00:00</span></span>
+    </div>
+    <span>localhost · interprete.ai</span>
+  </footer>
+
+</div>
+<script>
+// ── STATE ──────────────────────────────────────
+let segs = 0, words = 0, sessionStart = null, timer = null;
+let lastLang = null;
+
+// ── SESSION TIMER ──────────────────────────────
+function startTimer() {
+  if (timer) return;
+  sessionStart = Date.now();
+  timer = setInterval(() => {
+    const s  = Math.floor((Date.now() - sessionStart) / 1000);
+    const mm = String(Math.floor(s / 60)).padStart(2, '0');
+    const ss = String(s % 60).padStart(2, '0');
+    document.getElementById('statTime').textContent = `${mm}:${ss}`;
+  }, 1000);
+}
+
+// ── ADD ENTRY ──────────────────────────────────
+function addEntry(text, lang, translated) {
+  if (!text || !text.trim()) return;
+
+  // Remove empty state on first entry
+  const empty = document.getElementById('emptyState');
+  if (empty) empty.remove();
+
+  startTimer();
+
+  const now  = new Date();
+  const time = now.toTimeString().slice(0, 8);
+  const ln   = (lang || '').toLowerCase().slice(0, 2);
+  const cls  = ['es','en'].includes(ln) ? ln : 'other';
+
+  const translatedHtml = (translated && translated.trim())
+    ? `<div class="entry-translated">${esc(translated.trim())}</div>`
+    : '';
+
+  const entry = document.createElement('div');
+  entry.className = 'entry';
+  entry.innerHTML = `
+    <div class="entry-meta">
+      <span class="entry-time">${time}</span>
+      <span class="entry-lang ${cls}">${ln || '??'}</span>
+    </div>
+    <div>
+      <div class="entry-text">${esc(text.trim())}</div>
+      ${translatedHtml}
+    </div>
+  `;
+
+  const wrap = document.getElementById('transcript');
+  wrap.appendChild(entry);
+  wrap.scrollTop = wrap.scrollHeight;
+
+  // Update stats
+  segs++;
+  words += text.trim().split(/\s+/).length;
+  document.getElementById('statSegs').textContent  = segs;
+  document.getElementById('statWords').textContent = words;
+
+  // Update lang badge
+  if (ln !== lastLang) {
+    lastLang = ln;
+    const badge = document.getElementById('langBadge');
+    badge.textContent  = ln || '??';
+    badge.className    = 'lang-badge ' + cls;
+  }
+}
+
+function esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── SSE CONNECTION ─────────────────────────────
+// Connects to the backend's /events endpoint.
+// The browser reconnects automatically if the stream drops.
+function connectSSE() {
+  const dot   = document.getElementById('logoDot');
+  const pill  = document.getElementById('statusPill');
+
+  const es = new EventSource('http://localhost:8766/events');
+
+  es.onopen = () => {
+    dot.className  = 'logo-dot connected';
+    pill.textContent = 'Connected';
+    pill.className   = 'status-pill connected';
+  };
+
+  es.onmessage = (event) => {
+    try {
+      const { text, language, translated } = JSON.parse(event.data);
+      dot.className  = 'logo-dot live';
+      pill.textContent = 'LIVE';
+      pill.className   = 'status-pill live';
+      addEntry(text, language, translated);
+    } catch(e) {
+      console.error('SSE parse error:', e);
+    }
+  };
+
+  es.onerror = () => {
+    dot.className    = 'logo-dot';
+    pill.textContent = 'Reconnecting...';
+    pill.className   = 'status-pill';
+    // EventSource reconnects automatically — nothing to do
+  };
+}
+
+// ── CONTROLS ──────────────────────────────────
+document.getElementById('clearBtn').addEventListener('click', () => {
+  document.getElementById('transcript').innerHTML = `
+    <div class="empty" id="emptyState">
+      <div class="empty-icon">⌥</div>
+      <div class="empty-text">waiting for audio</div>
+    </div>`;
+  segs = 0; words = 0;
+  clearInterval(timer); timer = null;
+  document.getElementById('statSegs').textContent  = '0';
+  document.getElementById('statWords').textContent = '0';
+  document.getElementById('statTime').textContent  = '00:00';
+  document.getElementById('langBadge').textContent = '—';
+  document.getElementById('langBadge').className   = 'lang-badge';
+  lastLang = null;
+});
+
+document.getElementById('copyBtn').addEventListener('click', () => {
+  const text = [...document.querySelectorAll('.entry-text')]
+    .map(el => el.textContent).join('\n');
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copyBtn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 1500);
+  });
+});
+
+// ── INIT ──────────────────────────────────────
+connectSSE();
+</script>
+</body>
+</html>
