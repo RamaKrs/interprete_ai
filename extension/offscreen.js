@@ -1,14 +1,74 @@
-// Este contexto vive indefinidamente.
-// Aquí van: getUserMedia, MediaRecorder, WebSocket.
+// offscreen.js — Captura audio crudo (PCM) y lo transmite al backend.
+//
+// CAMBIO respecto a la versión anterior:
+// - Se reemplaza MediaRecorder (webm/opus) por un AudioWorkletNode que
+//   entrega muestras PCM crudas en mono a 16kHz — el formato que Whisper
+//   espera directamente. Esto elimina la necesidad de decodificar un
+//   contenedor de audio en el backend en cada pasada de transcripción.
+// - Se usa un AudioContext separado a 16kHz solo para la captura STT,
+//   distinto del contexto de reproducción, para no degradar el audio
+//   que el usuario escucha por los parlantes.
+// - El overlay visual y el manejo de mensajes WS entrantes quedan igual
+//   que antes — el backend sigue mandando texto plano por WebSocket.
 
-let mediaRecorder = null;
 let stream = null;
+let playbackContext = null;
+let sttContext = null;
+let workletNode = null;
 let ws = null;
 let reconnectTimer = null;
 const WS_URL = 'ws://localhost:8765';
+const STT_SAMPLE_RATE = 16000; // lo que espera faster-whisper
 
-// ------- WebSocket con reconexión automática -------
+// ─────────────────────────────────────────────
+// OVERLAY — muestra las transcripciones en pantalla
+// ─────────────────────────────────────────────
+let overlayDiv = null;
+let transcriptLines = [];
+const MAX_LINES = 6; // cuántas líneas mostrar a la vez
 
+function getOrCreateOverlay() {
+  if (overlayDiv) return overlayDiv;
+
+  overlayDiv = document.createElement('div');
+  overlayDiv.id = 'stt-overlay';
+  overlayDiv.style.cssText = `
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.75);
+    color: #ffffff;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    padding: 12px 20px;
+    border-radius: 10px;
+    max-width: 700px;
+    width: 90vw;
+    z-index: 2147483647;
+    text-align: center;
+    pointer-events: none;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    transition: opacity 0.3s ease;
+  `;
+  document.body.appendChild(overlayDiv);
+  return overlayDiv;
+}
+
+function showTranscription(text) {
+  const overlay = getOrCreateOverlay();
+  transcriptLines.push(text);
+  if (transcriptLines.length > MAX_LINES) {
+    transcriptLines.shift(); // elimina la línea más vieja
+  }
+  overlay.textContent = transcriptLines.join(' ');
+  overlay.style.opacity = '1';
+}
+
+// ─────────────────────────────────────────────
+// WEBSOCKET — sin cambios respecto a la versión anterior
+// ─────────────────────────────────────────────
 function connectWebSocket(onReady) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     onReady?.();
@@ -24,6 +84,14 @@ function connectWebSocket(onReady) {
     onReady?.();
   };
 
+  ws.onmessage = (event) => {
+    const text = event.data;
+    if (typeof text === 'string' && text.trim()) {
+      console.log('[offscreen] Transcripción recibida:', text);
+      showTranscription(text);
+    }
+  };
+
   ws.onclose = (e) => {
     console.warn('[offscreen] WebSocket cerrado, reconectando en 3s...', e.code);
     reconnectTimer = setTimeout(() => connectWebSocket(), 3000);
@@ -34,8 +102,9 @@ function connectWebSocket(onReady) {
   };
 }
 
-// ------- Captura de audio -------
-
+// ─────────────────────────────────────────────
+// CAPTURA DE AUDIO — PCM crudo vía AudioWorklet
+// ─────────────────────────────────────────────
 async function startCapture(streamId) {
   try {
     stream = await navigator.mediaDevices.getUserMedia({
@@ -48,19 +117,44 @@ async function startCapture(streamId) {
       video: false
     });
 
-    // Bifurcación de audio
-    const audioContext = new AudioContext();
-    const source = audioContext.createMediaStreamSource(stream);
+    // Contexto de reproducción — calidad completa, lo que el usuario escucha.
+    // No tiene nada que ver con la captura STT.
+    playbackContext = new AudioContext();
+    const playbackSource = playbackContext.createMediaStreamSource(stream);
+    playbackSource.connect(playbackContext.destination);
 
-    // Rama 1 → speakers (seguís escuchando)
-    source.connect(audioContext.destination);
+    // Contexto de captura STT — corre a 16kHz para que el navegador haga
+    // el resampleo por nosotros. Nunca llega a los parlantes.
+    sttContext = new AudioContext({ sampleRate: STT_SAMPLE_RATE });
+    console.log('[offscreen] STT context corriendo a', sttContext.sampleRate, 'Hz... Si esto loguea 48000 en lugar de 16000, Chrome no está honrando', );
+    // ↑ Si esto loguea 48000 en lugar de 16000, Chrome no está honrando el
+    // sampleRate pedido para este tipo de stream — avisame y resampleamos
+    // del lado del backend en vez de confiar en esto.
 
-    // Rama 2 → MediaRecorder → WebSocket
-    const destination = audioContext.createMediaStreamDestination();
-    source.connect(destination);
+    await sttContext.audioWorklet.addModule(chrome.runtime.getURL('pcm-worklet.js'));
+
+    const sttSource = sttContext.createMediaStreamSource(stream);
+    workletNode = new AudioWorkletNode(sttContext, 'pcm-capture');
+
+    workletNode.port.onmessage = (event) => {
+      const chunk = event.data; // Float32Array mono a 16kHz
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(chunk.buffer);
+      }
+    };
+
+    // El worklet solo se sigue ejecutando si está en un camino activo del
+    // grafo de audio. Lo conectamos a través de una ganancia en cero para
+    // que nunca suene, en vez de dejarlo desconectado.
+    const muteGain = sttContext.createGain();
+    muteGain.gain.value = 0;
+
+    sttSource.connect(workletNode);
+    workletNode.connect(muteGain);
+    muteGain.connect(sttContext.destination);
 
     connectWebSocket(() => {
-      startMediaRecorder(destination.stream); // ← stream clonado, no el original
+      console.log('[offscreen] Streaming de PCM activo');
     });
 
     return { success: true };
@@ -70,56 +164,43 @@ async function startCapture(streamId) {
   }
 }
 
-function startMediaRecorder(audioStream) {
-  // Elegir el mejor codec disponible
-  const mimeTypes = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/ogg;codecs=opus',
-  ];
-  const mimeType = mimeTypes.find(m => MediaRecorder.isTypeSupported(m)) ?? '';
-
-  mediaRecorder = new MediaRecorder(audioStream, {
-    mimeType,
-    audioBitsPerSecond: 128000
-  });
-
-  mediaRecorder.ondataavailable = (event) => {
-    if (event.data.size > 0 && ws?.readyState === WebSocket.OPEN) {
-      // Enviar chunk binario al backend Python
-      event.data.arrayBuffer().then(buffer => {
-        ws.send(buffer);
-      });
-    }
-  };
-
-  mediaRecorder.onstart = () => console.log('[offscreen] MediaRecorder iniciado');
-  mediaRecorder.onerror = (e) => console.error('[offscreen] MediaRecorder error:', e);
-
-  // timeslice de 250ms = buena latencia para STT en tiempo real
-  mediaRecorder.start(250);
-}
-
+// ─────────────────────────────────────────────
+// STOP — limpieza + ocultar overlay
+// ─────────────────────────────────────────────
 function stopCapture() {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop();
+  if (workletNode) {
+    workletNode.port.onmessage = null;
+    workletNode.disconnect();
+    workletNode = null;
+  }
+  if (sttContext) {
+    sttContext.close();
+    sttContext = null;
+  }
+  if (playbackContext) {
+    playbackContext.close();
+    playbackContext = null;
   }
   if (stream) {
     stream.getTracks().forEach(t => t.stop());
+    stream = null;
   }
   if (ws) {
     clearTimeout(reconnectTimer);
     ws.close();
+    ws = null;
   }
-  mediaRecorder = null;
-  stream = null;
-  ws = null;
+  if (overlayDiv) {
+    overlayDiv.remove();
+    overlayDiv = null;
+    transcriptLines = [];
+  }
 }
 
-// ------- Listener de mensajes -------
-
+// ─────────────────────────────────────────────
+// LISTENER DE MENSAJES — sin cambios
+// ─────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // Filtrar solo mensajes dirigidos al offscreen
   if (message.target !== 'offscreen') return false;
 
   if (message.type === 'OFFSCREEN_START') {

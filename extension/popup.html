@@ -1,9 +1,161 @@
 <!DOCTYPE html>
 <html>
-<body style="width:200px; padding:16px">
-  <button id="startBtn">▶ Iniciar captura</button>
-  <button id="stopBtn" disabled>⏹ Detener</button>
-  <p id="status">Listo</p>
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #0d0f12;
+      --surface: #13161b;
+      --border:  #1f2430;
+      --text:    #e8eaf0;
+      --muted:   #5a6070;
+      --accent:  #4f8fff;
+      --green:   #34d399;
+      --red:     #f87171;
+      --mono:    'DM Mono', monospace;
+      --sans:    'DM Sans', sans-serif;
+    }
+
+    body {
+      width: 220px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans), sans-serif;
+      font-size: 13px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .logo-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 6px var(--accent);
+    }
+
+    .logo-dot.recording {
+      background: var(--red);
+      box-shadow: 0 0 6px var(--red);
+      animation: blink .8s ease-in-out infinite;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .2; }
+    }
+
+    .status-pill {
+      font-size: 10px;
+      font-weight: 500;
+      padding: 2px 7px;
+      border-radius: 20px;
+      background: var(--border);
+      color: var(--muted);
+    }
+
+    .status-pill.live {
+      background: rgba(248,113,113,.15);
+      color: var(--red);
+    }
+
+    .body { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      width: 100%;
+      padding: 9px 12px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all .15s;
+      font-family: inherit;
+    }
+
+    .btn:disabled { opacity: .35; cursor: not-allowed; }
+
+    .btn-start {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    .btn-start:not(:disabled):hover {
+      background: #6fa8ff;
+      box-shadow: 0 0 16px rgba(79,143,255,.35);
+    }
+
+    .btn-stop {
+      background: rgba(248,113,113,.12);
+      color: var(--red);
+      border-color: rgba(248,113,113,.25);
+    }
+    .btn-stop:not(:disabled):hover { background: rgba(248,113,113,.2); }
+
+    .btn-dashboard {
+      background: transparent;
+      color: var(--muted);
+      border-color: var(--border);
+    }
+    .btn-dashboard:hover { color: var(--text); border-color: #2d3445; background: #1f2430; }
+
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 2px 0;
+    }
+
+    .icon { width: 12px; height: 12px; flex-shrink: 0; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">
+      <div class="logo-dot" id="logoDot"></div>
+      Interprete
+    </div>
+    <div class="status-pill" id="statusPill">Idle</div>
+  </div>
+
+  <div class="body">
+    <button class="btn btn-start" id="startBtn">
+      <svg class="icon" viewBox="0 0 12 12" fill="currentColor"><circle cx="6" cy="6" r="4"/></svg>
+      Start Capture
+    </button>
+    <button class="btn btn-stop" id="stopBtn" disabled>
+      <svg class="icon" viewBox="0 0 12 12" fill="currentColor"><rect x="2" y="2" width="8" height="8" rx="1"/></svg>
+      Stop Capture
+    </button>
+    <div class="divider"></div>
+    <button class="btn btn-dashboard" id="dashboardBtn">
+      <svg class="icon" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="10" height="10" rx="1.5"/><line x1="1" y1="4.5" x2="11" y2="4.5"/><line x1="5" y1="4.5" x2="5" y2="11"/></svg>
+      Open Dashboard
+    </button>
+  </div>
+
   <script src="popup.js"></script>
 </body>
 </html>

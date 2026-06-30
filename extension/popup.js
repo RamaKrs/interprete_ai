@@ -1,52 +1,59 @@
-// El popup SOLO gestiona el user gesture y obtiene el streamId.
-// No hace captura ni WebSocket.
+const DASHBOARD_URL = 'http://localhost:8766';
 
+// ── Sync UI with current state ──────────────────
 async function init() {
   const { isCapturing } = await chrome.runtime.sendMessage({ type: 'GET_STATE' });
-  document.getElementById('startBtn').disabled = isCapturing;
-  document.getElementById('stopBtn').disabled = !isCapturing;
-  document.getElementById('status').textContent = isCapturing ? '🔴 Capturando...' : 'Listo';
+  setUI(isCapturing);
 }
 
-init();
+function setUI(capturing) {
+  document.getElementById('startBtn').disabled = capturing;
+  document.getElementById('stopBtn').disabled = !capturing;
+  document.getElementById('statusPill').textContent = capturing ? 'Live' : 'Idle';
+  document.getElementById('statusPill').className = 'status-pill' + (capturing ? ' live' : '');
+  document.getElementById('logoDot').className = 'logo-dot' + (capturing ? ' recording' : '');
+}
 
+// ── Start: capture + open dashboard ────────────
 document.getElementById('startBtn').addEventListener('click', async () => {
-  const status = document.getElementById('status');
-  status.textContent = 'Iniciando...';
+  document.getElementById('startBtn').disabled = true;
 
   try {
-    // Esto REQUIERE user gesture y pestaña activa — perfecto para popup
     const streamId = await new Promise((resolve, reject) => {
-      chrome.tabCapture.getMediaStreamId(
-        { consumerTabId: chrome.devtools?.inspectedWindow?.tabId ?? undefined },
-        (id) => {
-          if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
-          else resolve(id);
-        }
-      );
+      chrome.tabCapture.getMediaStreamId({}, (id) => {
+        if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
+        else resolve(id);
+      });
     });
 
-    // Delegamos todo al service worker
     const response = await chrome.runtime.sendMessage({
       type: 'START_CAPTURE',
-      streamId: streamId
+      streamId
     });
 
     if (response?.success) {
-      status.textContent = '🔴 Capturando...';
-      document.getElementById('startBtn').disabled = true;
-      document.getElementById('stopBtn').disabled = false;
+      setUI(true);
+      // Open dashboard in a new tab — user can pop it out as an app
+      chrome.tabs.create({ url: DASHBOARD_URL });
     } else {
-      status.textContent = 'Error: ' + (response?.error ?? 'desconocido');
+      document.getElementById('startBtn').disabled = false;
+      console.error('Start failed:', response?.error);
     }
   } catch (err) {
-    status.textContent = 'Error: ' + err.message;
+    document.getElementById('startBtn').disabled = false;
+    console.error('Error:', err);
   }
 });
 
+// ── Stop ────────────────────────────────────────
 document.getElementById('stopBtn').addEventListener('click', async () => {
   await chrome.runtime.sendMessage({ type: 'STOP_CAPTURE' });
-  document.getElementById('status').textContent = 'Detenido';
-  document.getElementById('startBtn').disabled = false;
-  document.getElementById('stopBtn').disabled = true;
+  setUI(false);
 });
+
+// ── Open dashboard without starting capture ─────
+document.getElementById('dashboardBtn').addEventListener('click', () => {
+  chrome.tabs.create({ url: DASHBOARD_URL });
+});
+
+init();

@@ -1,11 +1,9 @@
-// El SW orquesta: crea el offscreen document y le pasa el streamId.
-// El SW puede vivir indefinidamente gracias al offscreen activo.
-
 const OFFSCREEN_URL = chrome.runtime.getURL('offscreen.html');
 
+// FIX: isCapturing was referenced in GET_STATE handler but never declared
+let isCapturing = false;
+
 async function ensureOffscreenDocument() {
-  const existing = await chrome.offscreen.hasDocument?.() ?? false;
-  // En versiones anteriores de la API, verificamos con getContexts
   const contexts = await chrome.runtime.getContexts({
     contextTypes: ['OFFSCREEN_DOCUMENT'],
     documentUrls: [OFFSCREEN_URL]
@@ -31,20 +29,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         await ensureOffscreenDocument();
         
-        // Esperar a que el offscreen esté listo y pasarle el streamId
         const response = await chrome.runtime.sendMessage({
           type: 'OFFSCREEN_START',
           streamId: message.streamId,
-          target: 'offscreen'  // para distinguir destinos
+          target: 'offscreen'
         });
-        
+
+        isCapturing = true;
         sendResponse({ success: true });
       } catch (err) {
         console.error('SW error:', err);
         sendResponse({ success: false, error: err.message });
       }
     })();
-    return true; // mantiene el canal abierto para sendResponse async
+    return true;
   }
 
   if (message.type === 'STOP_CAPTURE') {
@@ -58,6 +56,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           target: 'offscreen'
         });
       }
+      isCapturing = false;
       sendResponse({ success: true });
     })();
     return true;
